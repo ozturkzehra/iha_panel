@@ -2,83 +2,107 @@ package com.example.iha_panel.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.iha_panel.data.CurrentWeather
 import com.example.iha_panel.data.WeatherRepository
-import kotlinx.coroutines.Job
+import com.example.iha_panel.domain.FlightEvaluator
+import com.example.iha_panel.domain.UavPlatform
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-
-sealed interface UiState {
-    object Loading : UiState
-
-    data class Success(
-        val weather: CurrentWeather,
-        val status: FlightStatus,
-        val reason: String,
-        val lat: Double,
-        val lon: Double
-    ) : UiState
-
-    data class Error(val message: String) : UiState
-}
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 
 enum class FlightStatus {
-    GO,
-    CAUTION,
-    NO_GO
+    GO, CAUTION, NO_GO
 }
 
-data class FlightDecision(
-    val status: FlightStatus,
-    val reason: String
+data class WeatherUiState(
+    val isLoading: Boolean = false,
+    val temperature: Double = 0.0,
+    val windSpeed: Double = 0.0,
+    val visibility: Double = 10000.0,
+    val precipitation: Double = 0.0,
+    val flightStatus: FlightStatus = FlightStatus.GO,
+    val evaluationReason: String = "Sistem hazır",
+    val selectedPlatform: UavPlatform = UavPlatform.TB2,
+    val lastUpdated: String = "--:--",
+    val errorMessage: String? = null
 )
 
-class WeatherViewModel : ViewModel() {
+class WeatherViewModel(
+    private val repository: WeatherRepository = WeatherRepository()
+) : ViewModel() {
 
-    private val repository = WeatherRepository()
-
-    private val _state = MutableStateFlow<UiState>(UiState.Loading)
-    val uiState: StateFlow<UiState> = _state.asStateFlow()
-
-    private var loadJob: Job? = null
+    private val _uiState = MutableStateFlow(WeatherUiState())
+    val uiState: StateFlow<WeatherUiState> = _uiState.asStateFlow()
 
     init {
-        load(41.0, 29.0)
+        loadWeatherData()
     }
 
-    fun load(lat: Double, lon: Double) {
-        _state.value = UiState.Loading
-        loadJob?.cancel()
-        loadJob = viewModelScope.launch {
-            repository.getWeather(lat, lon)
-                .onSuccess { weatherData ->
-                    val decision = evaluate(weatherData)
-                    _state.value = UiState.Success(
-                        weather = weatherData,
-                        status = decision.status,
-                        reason = decision.reason,
-                        lat = lat,
-                        lon = lon
-                    )
+    fun onPlatformSelected(platform: UavPlatform) {
+        val current = _uiState.value
+        val evaluation = FlightEvaluator.evaluate(
+            windSpeed = current.windSpeed,
+            visibility = current.visibility,
+            precipitation = current.precipitation,
+            temperature = current.temperature,
+            platform = platform
+        )
+        _uiState.value = current.copy(
+            selectedPlatform = platform,
+            flightStatus = evaluation.status,
+            evaluationReason = evaluation.reason
+        )
+    }
+
+    fun loadWeatherData(lat: Double = 41.0, lon: Double = 29.0) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isLoading = true, errorMessage = null)
+            try {
+                val data = repository.getWeather(lat, lon)
+
+                // 1. Result paketinden veriyi çıkarıyoruz (getOrThrow ile)
+                val weather = data.getOrThrow()
+                
+                // 2. WeatherModels.kt'de tanımladığınız Kotlin değişken isimlerini kullanıyoruz
+                val wind = weather.windSpeed
+                val vis = weather.visibility
+                val precip = weather.precipitation
+                val temp = weather.temperature
+
+                val evaluation = FlightEvaluator.evaluate(
+                    windSpeed = wind,
+                    visibility = vis,
+                    precipitation = precip,
+                    temperature = temp,
+                    platform = _uiState.value.selectedPlatform
+                )
+
+                // API 24 uyumlu saat biçimlendirme
+                val timeFormatter = SimpleDateFormat("HH:mm", Locale.getDefault()).apply {
+                    timeZone = TimeZone.getDefault() // Cihazın/bulunulan yerin aktif saat dilimi
                 }
-                .onFailure {
-                    _state.value = UiState.Error(
-                        "Could not load weather data. Check your connection."
-                    )
-                }
+                val formattedTime = timeFormatter.format(Date())
+
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    temperature = temp,
+                    windSpeed = wind,
+                    visibility = vis,
+                    precipitation = precip,
+                    flightStatus = evaluation.status,
+                    evaluationReason = evaluation.reason,
+                    lastUpdated = formattedTime
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    errorMessage = "Telemetri verisi alınamadı: ${e.localizedMessage}"
+                )
+            }
         }
-    }
-
-    // Demo thresholds, NOT real aviation rules
-    private fun evaluate(w: CurrentWeather): FlightDecision = when {
-        w.windSpeed > 40 -> FlightDecision(FlightStatus.NO_GO, "Wind exceeds 40 km/h")
-        w.precipitation > 5 -> FlightDecision(FlightStatus.NO_GO, "Precipitation exceeds 5 mm")
-        w.visibility < 1000 -> FlightDecision(FlightStatus.NO_GO, "Visibility below 1000 m")
-        w.windSpeed > 25 -> FlightDecision(FlightStatus.CAUTION, "Wind exceeds 25 km/h")
-        w.precipitation > 1 -> FlightDecision(FlightStatus.CAUTION, "Precipitation exceeds 1 mm")
-        w.visibility < 5000 -> FlightDecision(FlightStatus.CAUTION, "Visibility below 5000 m")
-        else -> FlightDecision(FlightStatus.GO, "All conditions within limits")
     }
 }
