@@ -22,7 +22,7 @@ class FlightEvaluatorTest {
     fun icaoAnnex2_visibilityBelowMinimum_returnsNoGo() {
         val result = FlightEvaluator.evaluate(
             windSpeed = 10.0,
-            visibility = 1200.0,   // ICAO VFR alt sınırı altı
+            visibility = 1200.0,   //TB2 demo asgari görüşünün (2000 m) altı
             precipitation = 0.0,
             temperature = 18.0
         )
