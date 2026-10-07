@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import com.example.iha_panel.data.WeatherRepository
 import com.example.iha_panel.domain.FlightEvaluator
 import com.example.iha_panel.domain.UavPlatform
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -22,9 +24,7 @@ enum class FlightStatus {
 }
 
 data class WeatherUiState(
-    // Uygulama açılır açılmaz "yükleniyor" ile başlar, varsayılan değerler hiç görünmez
     val isLoading: Boolean = true,
-    // Ekranda gerçek (API'den gelmiş) veri var mı? false iken sayılar ve karar gösterilmez
     val hasData: Boolean = false,
     val temperature: Double = 0.0,
     val windSpeed: Double = 0.0,
@@ -44,7 +44,9 @@ class WeatherViewModel(
     private val _uiState = MutableStateFlow(WeatherUiState())
     val uiState: StateFlow<WeatherUiState> = _uiState.asStateFlow()
 
-    // "Tekrar dene" son kullanılan koordinatla çalışsın diye saklanır
+    // 5. Madde: Devam eden ağ isteğini tutan Job referansı
+    private var loadJob: Job? = null
+
     private var lastLat = 41.0
     private var lastLon = 29.0
 
@@ -55,7 +57,6 @@ class WeatherViewModel(
     fun onPlatformSelected(platform: UavPlatform) {
         val current = _uiState.value
 
-        // Gerçek veri yokken karar hesaplama: varsayılan sayılarla uydurma karar üretilmesin
         if (!current.hasData) {
             _uiState.value = current.copy(selectedPlatform = platform)
             return
@@ -83,7 +84,10 @@ class WeatherViewModel(
         lastLat = lat
         lastLon = lon
 
-        viewModelScope.launch {
+        // 5. Madde: Yeni istek geldiğinde çalışan eski işi iptal et (Race Condition önlemi)
+        loadJob?.cancel()
+
+        loadJob = viewModelScope.launch {
             _uiState.value = _uiState.value.copy(
                 isLoading = true,
                 hasData = false,
@@ -116,8 +120,10 @@ class WeatherViewModel(
                     lastUpdated = timeFormatter.format(Date()),
                     errorMessage = null
                 )
+            } catch (e: CancellationException) {
+                // 5. Madde: İptal hatasını yutma, coroutine yaşam döngüsü için yeniden fırlat
+                throw e
             } catch (e: Exception) {
-                // Teknik ayrıntı Logcat'e gider, kullanıcıya anlaşılır mesaj gösterilir
                 Log.e("Weather", "Veri alınamadı", e)
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
