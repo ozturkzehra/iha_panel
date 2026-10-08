@@ -80,7 +80,7 @@ class WeatherViewModel(
         loadWeatherData(lastLat, lastLon)
     }
 
-    fun loadWeatherData(lat: Double = 41.0, lon: Double = 29.0) {
+    fun loadWeatherData(lat: Double = 41.0082, lon: Double = 28.9784) {
         lastLat = lat
         lastLon = lon
 
