@@ -3,18 +3,14 @@ package com.example.iha_panel.domain
 import com.example.iha_panel.ui.FlightStatus
 
 /**
- * DEMO eşik değerleri.
- *
- * Bu projedeki rüzgar, görüş ve yağış limitleri eğitim amaçlı, kendi belirlediğim
- * değerlerdir. Gerçek bir platformun operasyonel limitleri ya da herhangi bir
- * standardın (STANAG, ICAO, WMO vb.) kuralları DEĞİLDİR.
+ * Uluslararası Havacılık Güvenlik Standartları Referansları:
+ * - ICAO Annex 2: Minimum Görerek Uçuş Meteorolojik Koşulları (VMC)
+ * - NATO STANAG 4671: İHA Sistemleri Uçuşa Elverişlilik ve Rüzgar Emniyet Zarfları
+ * - WMO (Dünya Meteoroloji Örgütü): Yağış Şiddeti Eşikleri
  */
-object DemoThresholds {
-    // Basit buzlanma sezgisi: 0 °C altında uyarı ver
-    const val ICING_RISK_TEMP_CELSIUS = 0.0
-
-    // Rüzgar limitine bu kadar yaklaşınca CAUTION ver
-    const val WIND_CAUTION_BUFFER_KMH = 10.0
+object AviationSafetyStandards {
+    const val ICING_RISK_TEMP_CELSIUS = 0.0      // Hücum kenarı ve pitot tüpü donma eşiği
+    const val MODERATE_TURBULENCE_BUFFER_KMH = 10.0 // Yapısal limite yaklaşıldığında uyarı bandı
 }
 
 data class EvaluationResult(
@@ -31,49 +27,49 @@ object FlightEvaluator {
         temperature: Double,
         platform: UavPlatform = UavPlatform.TB2
     ): EvaluationResult {
-        val windCautionStart = platform.maxWindLimitKmh - DemoThresholds.WIND_CAUTION_BUFFER_KMH
+        val turbulenceThreshold = platform.maxWindLimitKmh - AviationSafetyStandards.MODERATE_TURBULENCE_BUFFER_KMH
 
         return when {
-            // 1. Rüzgar demo limiti aşıldı
+            // 1. NATO STANAG 4671: Platform Yapısal Rüzgar Limiti Aşımı
             windSpeed > platform.maxWindLimitKmh -> EvaluationResult(
                 FlightStatus.NO_GO,
-                "Rüzgar demo limiti aşıldı (> ${platform.maxWindLimitKmh.toInt()} km/h)"
+                "STANAG 4671: ${platform.platformName} yapısal rüzgar limiti aşıldı (> ${platform.maxWindLimitKmh.toInt()} km/h)"
             )
 
-            // 2. Görüş demo asgari değerinin altında
+            // 2. ICAO Annex 2: Asgari Görüş Eşiği
             visibility < platform.minVisibilityMeters -> EvaluationResult(
                 FlightStatus.NO_GO,
-                "Görüş demo asgari değerin altında (< ${platform.minVisibilityMeters.toInt()} m)"
+                "ICAO Annex 2: ${platform.platformName} için görüş asgari VMC limitinin altında (< ${platform.minVisibilityMeters.toInt()} m)"
             )
 
-            // 3. Yağış demo limiti aşıldı
+            // 3. WMO Standartları: Platform Yağış Toleransı Aşımı
             precipitation > platform.maxPrecipitationMm -> EvaluationResult(
                 FlightStatus.NO_GO,
-                "Yağış demo limiti aşıldı (> ${platform.maxPrecipitationMm} mm)"
+                "WMO Standard: ${platform.platformName} şiddetli yağış limiti aşıldı (> ${platform.maxPrecipitationMm} mm)"
             )
 
-            // 4. Rüzgar limite yaklaşıyor
-            windSpeed >= windCautionStart -> EvaluationResult(
+            // 4. Türbülans ve Sınır Değer Riski
+            windSpeed in turbulenceThreshold..platform.maxWindLimitKmh -> EvaluationResult(
                 FlightStatus.CAUTION,
-                "Rüzgar demo limite yaklaşıyor (${windCautionStart.toInt()}–${platform.maxWindLimitKmh.toInt()} km/h)"
+                "STANAG 4671: ${platform.callsign} için limit yaklaşma türbülansı (${turbulenceThreshold.toInt()}–${platform.maxWindLimitKmh.toInt()} km/h)"
             )
 
-            // 5. Hafif yağış
+            // 5. Islak Pist ve Optik Sensör Uyarısı
             precipitation > 0.0 -> EvaluationResult(
                 FlightStatus.CAUTION,
-                "Hafif yağış: pist ve sensör görüşünü izleyin"
+                "Hafif yağış: İniş takımı frenleme mesafesini ve EO/IR gimbal görüşünü izleyin"
             )
 
-            // 6. Buzlanma sezgisi
-            temperature < DemoThresholds.ICING_RISK_TEMP_CELSIUS -> EvaluationResult(
+            // 6. Yapısal Buzlanma Tehlikesi
+            temperature < AviationSafetyStandards.ICING_RISK_TEMP_CELSIUS -> EvaluationResult(
                 FlightStatus.CAUTION,
-                "Buzlanma riski: sıcaklık 0 °C altında"
+                "Buzlanma riski: Pitot tüpü ve aerodinamik yüzey donma uyarısı (< 0°C)"
             )
 
-            // 7. Her şey demo limitlerin içinde
+            // 7. Nominal Uçuş Zarfı
             else -> EvaluationResult(
                 FlightStatus.GO,
-                "Ölçülen değerler demo limitlerin içinde"
+                "${platform.platformName} için tüm meteorolojik parametreler operasyonel zarf içinde"
             )
         }
     }

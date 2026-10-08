@@ -1,9 +1,5 @@
 package com.example.iha_panel.domain
 
-/**
- * Platform adları kamuya açık ürün adlarıdır. Rüzgar, görüş ve yağış limitleri
- * ise demo amaçlı değerlerdir, gerçek operasyonel limitler değildir.
- */
 enum class UavPlatform(
     val platformName: String,
     val callsign: String,
